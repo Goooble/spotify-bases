@@ -19,6 +19,29 @@ const p = (count = 2, snapshot = 'before'): Playlist => ({
   })),
 });
 describe('playlist creation', () => {
+  it('creates an empty playlist without an add-items request', async () => {
+    const api = new Spotify();
+    const request = vi.spyOn(api, 'request').mockResolvedValue({ id: 'empty' });
+    const result = await continueCreation(
+      api,
+      {
+        uris: [],
+        name: 'Empty',
+        description: '',
+        confirmed: 0,
+        uncertain: false,
+        complete: false,
+      },
+      () => {},
+    );
+    expect(result.complete).toBe(true);
+    expect(result.confirmed).toBe(0);
+    expect(request).toHaveBeenCalledExactlyOnceWith('me/playlists', 'POST', {
+      name: 'Empty',
+      description: '',
+      public: true,
+    });
+  });
   it('retains confirmed batches and resumes an uncertain request from remote contents', async () => {
     const api = new Spotify();
     const uris = Array.from({ length: 205 }, (_, i) => `spotify:track:${i}`);

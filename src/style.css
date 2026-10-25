@@ -105,12 +105,13 @@ small {
   padding: 5px;
 }
 .app {
+  --player-space: 180px;
   min-height: 100dvh;
   display: flex;
   flex-direction: column;
 }
 .app:has(.preview-bar) {
-  padding-bottom: 100px;
+  padding-bottom: var(--player-space);
 }
 .app-header {
   height: 72px;
@@ -660,16 +661,16 @@ th.pin-title {
   padding-bottom: 240px;
 }
 .app:has(.preview-bar):has(.draft-bar) {
-  padding-bottom: 340px;
+  padding-bottom: calc(240px + var(--player-space));
 }
 .app:has(.draft-bar) .toast {
   bottom: 240px;
 }
 .app:has(.preview-bar):has(.draft-bar) .toast {
-  bottom: 340px;
+  bottom: calc(240px + var(--player-space));
 }
 .app:has(.preview-bar) .draft-bar {
-  bottom: 100px;
+  bottom: var(--player-space);
 }
 @media (max-width: 1050px) {
   .draft-bar {
@@ -857,34 +858,17 @@ th.pin-title {
   min-height: 82px;
   flex-shrink: 0;
 }
-.preview-bar > img {
-  width: 48px;
-  height: 48px;
-  object-fit: cover;
-  border-radius: 5px;
-}
-.preview-identity {
-  width: 250px;
+.spotify-embed {
+  flex: 1;
   min-width: 0;
+  height: 152px;
 }
-.preview-identity strong,
-.preview-identity span {
+.preview-bar iframe {
   display: block;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.preview-identity strong {
-  font-size: 12px;
-}
-.preview-identity span {
-  font-size: 11px;
-  color: #8a967e;
-  margin-top: 5px;
-}
-.preview-bar audio {
-  height: 35px;
-  max-width: 300px;
+  width: 100%;
+  height: 152px;
+  border: 0;
+  border-radius: 12px;
 }
 .preview-bar a {
   display: flex;
@@ -893,9 +877,8 @@ th.pin-title {
   font-size: 11px;
   margin-left: auto;
 }
-.preview-unavailable {
-  font-size: 11px;
-  color: #99a08f;
+.app:has(.preview-bar):not(:has(.draft-bar)) .toast {
+  bottom: var(--player-space);
 }
 .toast {
   position: fixed;
@@ -1086,21 +1069,21 @@ th.pin-title {
   .last-refreshed {
     display: none;
   }
+  .app {
+    --player-space: 222px;
+  }
   .preview-bar {
     gap: 8px;
     padding: 10px;
+    flex-wrap: wrap;
   }
-  .preview-bar audio {
-    width: 170px;
-  }
-  .preview-bar > img {
-    display: none;
-  }
-  .preview-identity {
-    width: 100px;
+  .spotify-embed {
+    flex-basis: 100%;
   }
   .preview-bar a {
     font-size: 10px;
+    margin-left: 0;
+    margin-right: auto;
   }
   .welcome {
     padding: 25px;

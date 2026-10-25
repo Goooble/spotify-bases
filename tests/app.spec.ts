@@ -1,4 +1,34 @@
 ﻿import { test, expect, type Page } from '@playwright/test';
+
+test.beforeEach(async ({ page }) => {
+  await page.route('https://open.spotify.com/embed/**', (route) =>
+    route.fulfill({ contentType: 'text/html', body: '<button>Play in Spotify</button>' }),
+  );
+  await page.route('https://open.spotify.com/embed/iframe-api/v1', (route) =>
+    route.fulfill({
+      contentType: 'text/javascript',
+      body: `
+      window.embedCalls = [];
+      window.onSpotifyIframeApiReady({ createController(mount, options, callback) {
+        const frame = document.createElement('iframe');
+        frame.setAttribute('allow', 'autoplay; encrypted-media');
+        const load = (uri) => {
+          frame.src = 'https://open.spotify.com/embed/' + uri.split(':').slice(1).join('/');
+          window.embedCalls.push(['load', uri]);
+        };
+        load(options.uri);
+        mount.replaceWith(frame);
+        callback({
+          loadEntity: load,
+          play() { window.embedCalls.push(['play']); },
+          destroy() { window.embedCalls.push(['destroy']); frame.remove(); },
+          addListener(event, listener) { if (event === 'ready') setTimeout(listener, window.embedReadyDelay || 0); },
+        });
+      }});
+    `,
+    }),
+  );
+});
 async function mockSpotify(page: Page, count = 3, playlistCount = 2, writeLiked = true) {
   await page.addInitScript(
     (writeLiked) =>
@@ -491,9 +521,12 @@ test('folder preferences persist but playlist selection starts empty on reload',
   await expect(page.getByRole('button', { name: 'Alpha', exact: true })).toBeVisible();
   await page.getByRole('checkbox', { name: 'Select Alpha', exact: true }).check();
   await page.getByRole('textbox', { name: 'Search library' }).fill('Beta');
-  await expect(page.getByRole('button', { name: 'Create playlist', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Create playlist', exact: true })).toBeEnabled();
   await page.getByRole('button', { name: 'Beta', exact: true }).click();
-  await expect(page.getByText('Preview unavailable', { exact: true })).toBeVisible();
+  await expect(page.getByTitle('Spotify player: Beta')).toHaveAttribute(
+    'src',
+    'https://open.spotify.com/embed/track/b',
+  );
 });
 
 test('stages edits without requests, saves hidden-playlist drafts together, and supports Undo', async ({
@@ -652,4 +685,206 @@ test('virtualizes 20,000 selected rows with sticky headers and fixed preview', a
   const last = await page.locator('tbody tr[data-index="19999"]').boundingBox(),
     preview = await page.locator('.preview-bar').boundingBox();
   expect(last!.y + last!.height).toBeLessThanOrEqual(preview!.y);
+});
+
+test('creates an empty playlist without loading sources or adding items', async ({ page }) => {
+  const mock = await mockSpotify(page);
+  await ready(page);
+  await page.getByRole('button', { name: 'Create playlist', exact: true }).click();
+  await expect(page.getByRole('dialog')).toContainText('An empty public playlist will be created');
+  const submit = page.getByRole('button', { name: 'Create public playlist', exact: true });
+  await expect(submit).toBeDisabled();
+  await page.getByRole('textbox', { name: 'Playlist name' }).fill('Empty collection');
+  await submit.click();
+  await expect(page.getByRole('dialog')).toContainText('Complete');
+  expect(
+    mock.requests.filter((r) => r.path === 'me/playlists' && r.method === 'POST'),
+  ).toHaveLength(1);
+  expect(mock.requests.some((r) => r.path === 'playlists/new/items')).toBe(false);
+});
+
+test('uses one dynamic embed for tracks and episodes without API lookups', async ({ page }) => {
+  const mock = await mockSpotify(page);
+  await page.route('https://api.spotify.com/v1/playlists/p/items*', (route) =>
+    route.fulfill({
+      json: {
+        items: [
+          {
+            item: {
+              uri: 'spotify:track:a',
+              type: 'track',
+              name: 'Alpha',
+              artists: [],
+              duration_ms: 1000,
+            },
+            added_at: null,
+          },
+          {
+            item: {
+              uri: 'spotify:episode:e',
+              type: 'episode',
+              name: 'Episode',
+              show: { name: 'Show' },
+              duration_ms: 1000,
+            },
+            added_at: null,
+          },
+        ],
+        next: null,
+      },
+    }),
+  );
+  await ready(page);
+  await select(page);
+  const before = mock.requests.length;
+  await expect(page.locator('.preview-bar iframe')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Alpha', exact: true }).click();
+  await expect(page.getByTitle('Spotify player: Alpha')).toHaveAttribute(
+    'src',
+    'https://open.spotify.com/embed/track/a',
+  );
+  await expect(page.locator('.preview-bar iframe')).toHaveAttribute('allow', /encrypted-media/);
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (window as unknown as { embedCalls: string[][] }).embedCalls.filter(
+            (c) => c[0] === 'play',
+          ).length,
+      ),
+    )
+    .toBe(1);
+  await page.getByRole('button', { name: 'Alpha', exact: true }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (window as unknown as { embedCalls: string[][] }).embedCalls.filter(
+            (c) => c[0] === 'play',
+          ).length,
+      ),
+    )
+    .toBe(2);
+  await page.getByRole('button', { name: 'Episode', exact: true }).click();
+  await expect(page.locator('.preview-bar iframe')).toHaveCount(1);
+  await expect(page.getByTitle('Spotify player: Episode')).toHaveAttribute(
+    'src',
+    'https://open.spotify.com/embed/episode/e',
+  );
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () =>
+          (window as unknown as { embedCalls: string[][] }).embedCalls.filter(
+            (c) => c[0] === 'play',
+          ).length,
+      ),
+    )
+    .toBe(3);
+  await page.getByRole('checkbox', { name: 'Alpha in My playlist', exact: true }).uncheck();
+  await page.setViewportSize({ width: 390, height: 844 });
+  const player = await page.locator('.preview-bar iframe').boundingBox();
+  expect(player!.x).toBeGreaterThanOrEqual(0);
+  expect(player!.x + player!.width).toBeLessThanOrEqual(390);
+  const draft = await page.locator('.draft-bar').boundingBox();
+  const bar = await page.locator('.preview-bar').boundingBox();
+  expect(draft!.y + draft!.height).toBeLessThanOrEqual(bar!.y);
+  await page.getByRole('button', { name: 'Close preview' }).click();
+  await expect(page.locator('.preview-bar iframe')).toHaveCount(0);
+  expect(mock.requests).toHaveLength(before);
+  expect(
+    await page.evaluate(() => (window as unknown as { embedCalls: string[][] }).embedCalls.at(-1)),
+  ).toEqual(['destroy']);
+});
+
+test('plays only the latest selection when the embed becomes ready', async ({ page }) => {
+  await page.addInitScript('window.embedReadyDelay = 800');
+  await mockSpotify(page);
+  await ready(page);
+  await select(page);
+  await page.getByRole('button', { name: 'Alpha', exact: true }).click();
+  await page.getByRole('button', { name: 'Beta', exact: true }).click();
+  await expect(page.getByTitle('Spotify player: Beta')).toHaveAttribute(
+    'src',
+    'https://open.spotify.com/embed/track/b',
+  );
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        (window as unknown as { embedCalls: string[][] }).embedCalls.filter((c) => c[0] === 'play'),
+      ),
+    )
+    .toEqual([['play']]);
+});
+
+test('keeps a usable embed when the iframe API script fails', async ({ page }) => {
+  await page.route('https://open.spotify.com/embed/iframe-api/v1', (route) => route.abort());
+  await mockSpotify(page);
+  await ready(page);
+  await select(page);
+  await page.getByRole('button', { name: 'Alpha', exact: true }).click();
+  await expect(page.getByTitle('Spotify player: Alpha')).toHaveAttribute(
+    'src',
+    'https://open.spotify.com/embed/track/a',
+  );
+  await expect(page.getByRole('link', { name: 'Open in Spotify' })).toBeVisible();
+});
+
+test('shows and switches embeds even when the control script never calls back', async ({
+  page,
+}) => {
+  await page.route('https://open.spotify.com/embed/iframe-api/v1', (route) =>
+    route.fulfill({
+      contentType: 'text/javascript',
+      body: '/* bootstrap loaded, nested script stalled */',
+    }),
+  );
+  const mock = await mockSpotify(page);
+  await ready(page);
+  await select(page);
+  const before = mock.requests.length;
+  await page.clock.install();
+  await page.getByRole('button', { name: 'Alpha', exact: true }).click();
+  await expect(page.getByTitle('Spotify player: Alpha')).toHaveAttribute(
+    'src',
+    'https://open.spotify.com/embed/track/a',
+  );
+  await page.getByRole('button', { name: 'Beta', exact: true }).click();
+  await expect(page.getByTitle('Spotify player: Beta')).toHaveAttribute(
+    'src',
+    'https://open.spotify.com/embed/track/b',
+  );
+  await page.clock.fastForward(11000);
+  await expect(page.locator('.preview-bar iframe')).toHaveCount(1);
+  await expect(page.getByTitle('Spotify player: Beta')).toHaveAttribute(
+    'src',
+    'https://open.spotify.com/embed/track/b',
+  );
+  await page.getByRole('button', { name: 'Close preview' }).click();
+  await expect(page.locator('.preview-bar iframe')).toHaveCount(0);
+  expect(mock.requests).toHaveLength(before);
+});
+
+test('restores a plain embed if controller creation removes the frame then throws', async ({
+  page,
+}) => {
+  await page.route('https://open.spotify.com/embed/iframe-api/v1', (route) =>
+    route.fulfill({
+      contentType: 'text/javascript',
+      body: `window.onSpotifyIframeApiReady({ createController(mount) { mount.remove(); throw new Error('Controller failed'); } });`,
+    }),
+  );
+  await mockSpotify(page);
+  await ready(page);
+  await select(page);
+  await page.getByRole('button', { name: 'Alpha', exact: true }).click();
+  await expect(page.getByTitle('Spotify player: Alpha')).toHaveAttribute(
+    'src',
+    'https://open.spotify.com/embed/track/a',
+  );
+  await page.getByRole('button', { name: 'Beta', exact: true }).click();
+  await expect(page.getByTitle('Spotify player: Beta')).toHaveAttribute(
+    'src',
+    'https://open.spotify.com/embed/track/b',
+  );
 });

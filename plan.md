@@ -4,7 +4,7 @@
 
 **Last reviewed:** 2026-10-25, against the current source, configuration, and automated tests.
 
-**Implementation status:** V1 is implemented as a static React/Vite SPA with Spotify PKCE, automatic saved-track metadata, a Liked Songs sidebar source, on-demand ordinary playlists, full-page virtualized scrolling, nested filters, searchable local folders, draggable and sortable playlist columns, staged batch Save/Discard/Undo, recoverable public playlist creation, and preview fallback. Rate-limit cooldowns persist across reloads. Latest completed validation: 40 unit tests, 14 browser tests, lint, TypeScript checks, and the production build passed. Real-account permissions, live Spotify behavior, and production hosting still require environment-specific verification; see section 11 and README.md.
+**Implementation status:** V1 is implemented as a static React/Vite SPA with Spotify PKCE, automatic saved-track metadata, a Liked Songs sidebar source, on-demand ordinary playlists, full-page virtualized scrolling, nested filters, searchable local folders, draggable and sortable playlist columns, staged batch Save/Discard/Undo, recoverable public playlist creation, and a dynamic Spotify embedded player. Empty public playlist creation is supported. Rate-limit cooldowns persist across reloads. Latest completed validation: 41 unit tests, 20 browser tests, lint, TypeScript checks, and the production build passed. Real-account permissions, live Spotify behavior, and production hosting still require environment-specific verification; see section 11 and README.md.
 
 Build a personal web app for managing Spotify playlists and exploring music already present in the user's Spotify library. The core interface is a Bases-inspired table: one row per distinct Spotify item, with track metadata and optional playlist-membership columns. The user narrows the library with search, filters, and sorts, then adds tracks to a new public playlist or edits an existing editable playlist directly from the table.
 
@@ -68,8 +68,8 @@ Playlist selection always starts empty; legacy stored selections are ignored. Ad
 - **Main workspace:** Searchable table of the selected accessible playlists, loaded on demand.
 - **Table toolbar:** Filter builder, sort controls, visible-column controls as needed, result count, and a clear **Refresh** button with last-refreshed/status feedback.
 - **Pending changes bar:** Visible while scrolling, with a global Save changes count, Discard changes, and per-source addition/removal summaries. Deselecting a source does not discard its pending edits.
-- **Bottom preview bar:** Fixed to the bottom when the user clicks a track row. Shows track/episode identity and playback controls for an available preview; “Open in Spotify” remains available. Page spacing keeps the final rows clear of the preview and pending-changes controls.
-- **Playlist creation flow:** Create a public Spotify playlist from selected rows in the current result set, with a name and optional description. No manual arrangement step.
+- **Bottom preview bar:** Fixed to the bottom when the user clicks a track row. Loads one Spotify iframe for the selected track/episode with click-triggered playback requests; “Open in Spotify” remains available. Page spacing keeps the final rows clear of the preview and pending-changes controls.
+- **Playlist creation flow:** Create an empty public Spotify playlist or include selected rows in the current result set, with a name and optional description. No manual arrangement step.
 
 ### 5.2 Sidebar folders and playlist columns
 
@@ -130,18 +130,19 @@ Obsidian Bases references:
 - Bases views combine displayed properties, filters, sorting, and grouping controls. The app adopts the property/operator/value filter model, nested Boolean groups, configurable table columns, search, and sort, while omitting saved views and other layouts in v1: [Views](https://obsidian.md/help/bases/views).
 - Bases syntax supports recursively nested `and`, `or`, and `not` groups, and distinguishes filters applying to all views from filters applying to a single view. This app should use the same understandable logic in a visual filter builder; it does not need to adopt the `.base` file format: [Bases syntax](https://obsidian.md/help/bases/syntax).
 
-### 5.5 Preview behavior
+### 5.5 Embedded playback
 
-- Clicking a row opens/updates a single bottom preview bar; do not add play controls to every row.
-- Play a 30-second preview where Spotify provides a usable preview URL.
-- If the preview is missing or fails, show a direct “Open in Spotify” link for the item.
-- Do not download or cache audio. Preview availability is opportunistic; Spotify marks the preview field deprecated and nullable, and notes clips cannot be offered as a standalone service: [Spotify track reference](https://developer.spotify.com/documentation/web-api/reference/get-track).
+- Clicking a row mounts one bottom Spotify iframe for its track or episode ID. Spotify's iframe API requests playback when ready and on each row click, including repeated clicks. Switching items reuses the controller; closing destroys it and stops playback. Pending initialization uses only the latest selection; closed players never start late. No per-row players.
+- Keep Spotify's playback controls and standard embed permissions, including encrypted media. Render a plain embed immediately, then upgrade it when the optional API is ready. Cache the initialized API across hot reloads; give up waiting for initialization after 10 seconds. Stalled scripts and controller-creation failures must preserve a usable plain embed and song switching. Browser/Spotify restrictions may still require clicking Play inside the player. No extra Web API lookup or additional OAuth scopes are needed.
+- Keep Open in Spotify available. Playback depends on Spotify, browser support, and the listener's session; not every item is guaranteed to play.
+- Adjust responsive page spacing and floating Save/Discard/toast offsets so the player does not cover rows or controls.
+- The app does not download or cache audio. Optional preview metadata remains in the model but is no longer used for playback. See [Spotify embeds](https://developer.spotify.com/documentation/embeds/tutorials/creating-an-embed).
 
 ### 5.6 New playlist creation
 
-- User selects tracks from the current result set using row selection controls.
+- With no selected rows, create an empty public playlist. Otherwise include selected tracks from the current result set using row selection controls. The dialog explains which behavior applies.
 - Clear row selections when they leave the result set. Freeze selected URIs and their current order when creation begins.
-- Create a public playlist by default, with editable name and optional description.
+- Create a public playlist by default, with a required nonblank name and optional description. Empty creation sends no add-items requests. Busy-state and rate-limit safeguards still apply.
 - Add selected Spotify URIs in the table's deterministic current order (e.g. current sort order); no separate arrangement UI.
 - Display progress and a link to open the new playlist in Spotify.
 - Add items in batches of at most 100. Preserve the created playlist link and confirmed progress on failure, including when the dialog closes. Resume only after reconciling remote contents; an unknown playlist-creation outcome requires inspection in Spotify before starting another creation.
@@ -189,7 +190,7 @@ Obsidian Bases references:
 - Represent source access as unloaded, loading, readable, inaccessible, or failed. Limit concurrent API requests to three, paginate collections, support cancellation, retry authorization once after refresh, and never automatically retry a 429.
 - Use current `/playlists/{id}/items` endpoints for ordinary playlists. Use `/me/tracks` to load Liked Songs and `/me/library/contains` plus `PUT`/`DELETE /me/library` with URI query parameters for its membership edits, in batches of at most 40. Accept empty successful library-write responses.
 - Keep Spotify-provided artwork/metadata in original form with links back to Spotify content as required by Spotify's developer policies.
-- Treat preview URLs as optional and ephemeral; use Spotify web URLs for fallback links.
+- Use existing Spotify track/episode IDs for embeds and Spotify web URLs for fallback links; preview URLs remain optional metadata.
 
 ### 6.4 Implemented module boundaries
 
@@ -201,6 +202,7 @@ Obsidian Bases references:
 - `LibraryTable.tsx` and `Sidebar.tsx`: window virtualization, sticky/pinned columns, drag/keyboard ordering, header sorting, local playlist search, and folders.
 - `rateLimit.ts` and `useRateLimit.ts`: persisted cooldown gate and diagnostic countdown.
 - `App.tsx`: workspace composition, preview, settings, source selection, save/discard controls, and draft protection.
+- `SpotifyEmbed.tsx`: immediately visible track/episode iframe, optional click-to-play controller, API cache across hot reloads, initialization timeout, and plain-embed recovery.
 
 ## 7. Implementation phases
 
@@ -247,13 +249,13 @@ Phases 0–5 and the local implementation in Phase 6 are complete. The lists bel
 
 - Stage additions/removals for editable playlists and apply them through Save changes using batched writes.
 - Add mutation progress/errors and Undo.
-- Build selected-track playlist creation flow with public default and Spotify link after creation.
+- Build empty or selected-track playlist creation with public default and Spotify link after creation.
 - Reconcile UI state with remote response and handle partial failures.
 - Support saved-library edits and Undo for Liked Songs, including reconnection for older grants.
 
 ### Phase 6 — Preview and deployment polish (implemented locally; live checks remain)
 
-- Add bottom preview bar with available clip playback and Spotify-link fallback.
+- Add one dynamic bottom Spotify embed with click-triggered playback requests and Spotify-link fallback.
 - Verify no audio downloading/caching.
 - Document self-host setup, Spotify developer app configuration, redirect URLs, environment variables, and deployment.
 - Review privacy, token handling, source attribution, and API error behavior.
@@ -270,7 +272,7 @@ Phases 0–5 and the local implementation in Phase 6 are complete. The lists bel
 7. The user can build nested AND/OR/NOT filters and sort by the agreed properties.
 8. Checkbox edits and Discard send no API requests. Save changes batches pending additions/removals across playlists; Undo reverses successful changes when possible, and partial failures remain recoverable.
 9. The user can select filtered results and create a public Spotify playlist, then open it in Spotify.
-10. Clicking a row opens the bottom preview bar; an available clip plays, otherwise the Spotify link is offered.
+10. Clicking a row loads one bottom Spotify track/episode embed without extra Web API requests. Switching reuses the controller and requests playback, closing destroys it, and Open in Spotify remains available.
 11. The playlist list loads on app open. Manual Refresh reloads only the list and selected contents; saved metadata refreshes automatically, and drafts are protected from silent discard.
 12. Local folders/preferences and credentials are not committed to the repository.
 13. The table scrolls through the page while rendering only nearby rows; headers and track titles stay aligned during horizontal scrolling, column reordering, and resizing.
@@ -281,7 +283,7 @@ Phases 0–5 and the local implementation in Phase 6 are complete. The lists bel
 ## 9. Risks and mitigations
 
 - **Spotify API access restrictions:** Show inaccessible playlists as disabled; never imply all followed playlist contents can be fetched.
-- **Deprecated/missing preview URLs:** Treat clips as optional and provide the Spotify link fallback.
+- **Embedded playback restrictions:** Spotify controls availability; retain Open in Spotify when the embed cannot play. Deprecated preview URLs are not required.
 - **Large libraries:** Paginate API calls and virtualize table rows; avoid loading every data page synchronously into the UI.
 - **Batched playlist edits:** Use clear loading/error states and Undo; reconcile with Spotify after mutations.
 - **Self-host credential setup:** Include a concise setup guide and validate required configuration at startup.
@@ -301,7 +303,7 @@ Phases 0–5 and the local implementation in Phase 6 are complete. The lists bel
 - Initial sorts: title, artist, album, added date, playlist membership.
 - Full-page window virtualization, sticky synchronized headers, pinned titles, draggable/keyboard playlist columns, and header-click membership sort toggling.
 - Local sidebar playlist search; filtering the sidebar preserves selection and limits folder bulk actions to visible matches.
-- Bottom preview bar, clip when available, Spotify link fallback.
+- One dynamic Spotify track/episode embed, click-triggered playback requests, and Spotify link fallback; empty public playlist creation or selected-row creation.
 - Automatic account, playlist-list, and saved-track metadata on open; on-demand ordinary playlist contents. Manual Refresh also reloads saved metadata and selected ordinary playlists.
 - Global staged Save/Discard, batches of 100 playlist items or 40 liked tracks, and 15-second post-save Undo.
 - Persisted 429 cooldowns with quota-specific diagnostics, no automatic retries, and no assumed Spotify reset time when `Retry-After` is unavailable.
@@ -310,10 +312,12 @@ Phases 0–5 and the local implementation in Phase 6 are complete. The lists bel
 
 ## 11. Validation and remaining release checks
 
-Latest completed automated validation: **40 unit tests and 14 browser tests passed**, together with `npm run lint`, `npm run typecheck`, and `npm run build`. Unit coverage includes normalization, nested filters, token lifecycle, pagination/cancellation, cooldown persistence, batched save recovery, Liked Songs writes, and Undo. Browser coverage includes empty initial selection with automatic saved metadata, source selection, sidebar search/folders, drag and keyboard column ordering, resizing, header sorting, draft protection, creation recovery, Liked Songs permissions, and a 20,000-row/20-column scrolling fixture.
+Latest completed automated validation: **41 unit tests and 20 browser tests passed**, together with `npm run lint`, `npm run typecheck`, and `npm run build`. Unit coverage includes normalization, nested filters, token lifecycle, pagination/cancellation, cooldown persistence, batched save recovery, Liked Songs writes, and Undo. Browser coverage includes empty initial selection with automatic saved metadata, source selection, sidebar search/folders, drag and keyboard column ordering, resizing, header sorting, draft protection, empty creation and creation recovery, dynamic track/episode embeds with click playback, delayed readiness, stalled initialization, script failure and controller-creation fallback, Liked Songs permissions, and a 20,000-row/20-column scrolling fixture.
 
 GitHub Actions runs lint, typecheck, unit tests, the production build, and Chromium browser tests on pushes and pull requests. Browser tests use mocked Spotify responses and an isolated local server on port 5174; they do not modify a real Spotify account.
 
-Before a production release, verify the configured Spotify app's real authorization grants, readable/editable sources, save/Undo behavior on disposable content, preview availability, and the host's HTTPS/callback rewrite. Review refresh timestamp wording: the current stored timestamp records playlist discovery completion rather than completion of every selected source load. Spotify's actual quota reset schedule cannot be verified by mocked tests or inferred from the app's fallback pause.
+Live embed smoke check: the repaired React player loaded Spotify's real iframe API and a public track in an isolated Chromium browser, rendered one 152px-high iframe without page errors, and removed it on close. The user also confirmed embedded playback worked before the autoplay change. The isolated check verifies loading and cleanup, not signed-in playback availability or autoplay permission.
+
+Before a production release, verify the configured Spotify app's real authorization grants, readable/editable sources, save/Undo behavior on disposable content, live embedded playback availability, and the host's HTTPS/callback rewrite. Review refresh timestamp wording: the current stored timestamp records playlist discovery completion rather than completion of every selected source load. Spotify's actual quota reset schedule cannot be verified by mocked tests or inferred from the app's fallback pause.
 
 Deferred work remains named saved views, manual track ordering, Spotify-folder synchronization, additional layouts, saved-episode sourcing, and multi-user/server persistence. Setup and deployment commands are maintained in README.md.

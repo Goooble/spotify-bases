@@ -44,6 +44,7 @@ import { continueCreation, type Creation } from './operations';
 import LibraryTable from './LibraryTable';
 import FilterEditor from './FilterEditor';
 import Sidebar from './Sidebar';
+import SpotifyEmbed from './SpotifyEmbed';
 function Modal({
   open,
   onOpenChange,
@@ -87,7 +88,6 @@ export default function App() {
   const savingRef = useRef(false);
   const [guard, setGuard] = useState<'refresh' | 'logout'>();
   const [preview, setPreview] = useState<LibraryItem>();
-  const [previewFailed, setPreviewFailed] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [columnsOpen, setColumnsOpen] = useState(false);
@@ -272,7 +272,7 @@ export default function App() {
       uncertain: false,
       complete: false,
     };
-    if (!job.name || !job.uris.length) return;
+    if (!job.name) return;
     setCreating(true);
     setError('');
     try {
@@ -424,13 +424,7 @@ export default function App() {
             </div>
             <button
               className="primary"
-              disabled={
-                (!selected.size && (!creation || creation.complete)) ||
-                refreshing ||
-                creating ||
-                saving ||
-                networkBlocked
-              }
+              disabled={refreshing || creating || saving || networkBlocked}
               onClick={openCreation}
             >
               <Plus size={17} />{' '}
@@ -674,8 +668,7 @@ export default function App() {
             selected={selected}
             onSelect={setSelected}
             onPreview={(r) => {
-              setPreview(r);
-              setPreviewFailed(false);
+              setPreview({ ...r });
             }}
             onMembership={(p, r, present) => void membership(p, r, present)}
             busy={busy}
@@ -758,22 +751,7 @@ export default function App() {
       </Modal>
       {preview && (
         <div className="preview-bar">
-          {preview.image && <img src={preview.image} alt="" />}
-          <div className="preview-identity">
-            <strong>{preview.title}</strong>
-            <span>{preview.artists.join(', ')}</span>
-          </div>
-          {preview.preview && !previewFailed ? (
-            <audio
-              key={preview.uri}
-              src={preview.preview}
-              controls
-              preload="none"
-              onError={() => setPreviewFailed(true)}
-            />
-          ) : (
-            <span className="preview-unavailable">Preview unavailable</span>
-          )}
+          <SpotifyEmbed item={preview} />
           <a href={preview.url} target="_blank" rel="noreferrer">
             Open in Spotify <ExternalLink size={14} />
           </a>
@@ -851,8 +829,9 @@ export default function App() {
         {!creation?.playlist && (
           <>
             <p>
-              {creation?.uris.length ?? selected.size} selected items will be added in the current
-              table order.
+              {(creation?.uris.length ?? selected.size) > 0
+                ? `${creation?.uris.length ?? selected.size} selected items will be added in the current table order.`
+                : 'An empty public playlist will be created. Select song rows first to include songs.'}
             </p>
             <label className="form-label">
               Playlist name
