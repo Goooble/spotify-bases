@@ -174,7 +174,26 @@ export function usePlaylistLibrary(
     requests.current.clear();
     const generation = version.current;
     try {
-      const discovered = await spotify.library(() => {});
+      const discovered = await spotify.library((partial) => {
+        if (generation !== version.current) return;
+        // Restore account-scoped folders even if the following playlist request fails.
+        onAccount(partial.account);
+        setLibrary((current) =>
+          current &&
+          (current.account.account_id ?? current.account.id) ===
+            (partial.account.account_id ?? partial.account.id)
+            ? current
+            : {
+                ...partial,
+                playlists: [
+                  {
+                    ...likedSongsPlaylist([], partial.account.id, canEditLikedSongs()),
+                    access: 'unloaded',
+                  },
+                ],
+              },
+        );
+      });
       if (generation !== version.current) return;
       const old = state.current,
         same =
@@ -192,6 +211,18 @@ export function usePlaylistLibrary(
           ? { ...p, access: 'readable' as const, occurrences: cached.occurrences }
           : p;
       });
+      if (same) {
+        for (const previous of old.playlists) {
+          if (previous.id !== LIKED_SONGS_ID && !playlists.some((p) => p.id === previous.id))
+            playlists.push({
+              ...previous,
+              access: 'failed',
+              occurrences: [],
+              reason:
+                'Not returned by Spotify in the latest playlist list. Refresh or select and retry loading.',
+            });
+        }
+      }
       setLibrary({
         ...discovered,
         playlists: [
@@ -206,7 +237,10 @@ export function usePlaylistLibrary(
       });
       setStatus('Playlist list ready');
     } catch (e) {
-      if (generation === version.current) setError(errorMessage(e));
+      if (generation === version.current) {
+        setError(errorMessage(e));
+        setStatus('Could not refresh the playlist list. Saved folders have been kept.');
+      }
     } finally {
       refreshLock.current = false;
       if (generation === version.current) setRefreshing(false);

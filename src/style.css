@@ -277,6 +277,16 @@ th[data-drop-target='true'] {
   text-overflow: ellipsis;
   font-size: 10px;
 }
+.missing-playlist {
+  font-size: 12px;
+}
+.missing-playlist small {
+  white-space: normal;
+  margin: 4px 0;
+}
+.missing-playlist a {
+  font-size: 11px;
+}
 .playlist-entry:has(input:checked) {
   background: #e1eadc;
 }

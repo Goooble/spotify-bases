@@ -70,6 +70,7 @@ export default function Sidebar({
       )}
       <select
         aria-label={`Move ${p.name} to folder`}
+        disabled={disabled}
         title="Move to local folder"
         value={prefs.folders.find((f) => f.playlists.includes(p.id))?.id ?? ''}
         onChange={(e) =>
@@ -102,6 +103,7 @@ export default function Sidebar({
           className="icon-button"
           title="Create local folder"
           aria-label="Create local folder"
+          disabled={disabled}
           onClick={() => setAdding(!adding)}
         >
           <FolderPlus size={18} />
@@ -146,11 +148,12 @@ export default function Sidebar({
           <input
             autoFocus
             aria-label="New folder name"
+            disabled={disabled}
             placeholder="Folder name"
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
           />
-          <button>Add</button>
+          <button disabled={disabled}>Add</button>
         </form>
       )}
       <div className="sidebar-list">
@@ -163,6 +166,7 @@ export default function Sidebar({
                   <button
                     className="icon-button"
                     aria-label={`${folder.collapsed ? 'Expand' : 'Collapse'} ${folder.name}`}
+                    disabled={disabled}
                     onClick={() => updateFolder({ ...folder, collapsed: !folder.collapsed })}
                   >
                     {folder.collapsed ? <ChevronRight size={15} /> : <ChevronDown size={15} />}
@@ -171,6 +175,7 @@ export default function Sidebar({
                   <input
                     className="folder-name"
                     aria-label="Rename folder"
+                    disabled={disabled}
                     value={folder.name}
                     onChange={(e) => updateFolder({ ...folder, name: e.target.value })}
                   />
@@ -199,7 +204,7 @@ export default function Sidebar({
                   <>
                     <div className="folder-controls">
                       <button
-                        disabled={index === 0}
+                        disabled={disabled || index === 0}
                         onClick={() => {
                           const folders = [...prefs.folders];
                           [folders[index - 1], folders[index]] = [
@@ -212,7 +217,7 @@ export default function Sidebar({
                         Move up
                       </button>
                       <button
-                        disabled={index === prefs.folders.length - 1}
+                        disabled={disabled || index === prefs.folders.length - 1}
                         onClick={() => {
                           const folders = [...prefs.folders];
                           [folders[index + 1], folders[index]] = [
@@ -225,6 +230,7 @@ export default function Sidebar({
                         Move down
                       </button>
                       <button
+                        disabled={disabled}
                         onClick={() =>
                           onChange({
                             ...prefs,
@@ -235,11 +241,34 @@ export default function Sidebar({
                         Delete
                       </button>
                     </div>
-                    {folder.playlists
-                      .map((id) => playlists.find((p) => p.id === id))
-                      .filter((p): p is Playlist => !!p)
-                      .filter(matches)
-                      .map(playlist)}
+                    {folder.playlists.map((id) => {
+                      const source = playlists.find((p) => p.id === id);
+                      if (source) return matches(source) ? playlist(source) : null;
+                      if (needle && !id.toLocaleLowerCase().includes(needle)) return null;
+                      return (
+                        <div className="playlist-entry missing-playlist" key={id}>
+                          <span>
+                            Unavailable playlist
+                            <small>
+                              Spotify has not returned this playlist. Its folder assignment is kept.
+                              Refresh to try again.
+                            </small>
+                          </span>
+                          <a
+                            href={
+                              id === LIKED_SONGS_ID
+                                ? 'https://open.spotify.com/collection/tracks'
+                                : `https://open.spotify.com/playlist/${encodeURIComponent(id)}`
+                            }
+                            target="_blank"
+                            rel="noreferrer"
+                            aria-label={`Open unavailable playlist ${id} in Spotify`}
+                          >
+                            Open in Spotify
+                          </a>
+                        </div>
+                      );
+                    })}
                   </>
                 )}
               </section>

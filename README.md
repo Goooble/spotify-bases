@@ -14,10 +14,19 @@ Requires Node.js 22.12+ (Node 24 recommended), npm, and your own Spotify develop
 
 Spotify does not accept `localhost` redirect URIs. Production redirect URIs require HTTPS. Environment changes require restarting Vite.
 
+## Windows desktop launcher
+
+After the initial setup, run `npm.cmd run desktop` once to install **Spotify Bases** and **Stop Spotify Bases** shortcuts on your desktop. Double-click Spotify Bases to start a hidden local server, wait until it is ready, and open your default browser. Launching again reuses the running server. Closing the browser tab leaves the server running; use Stop Spotify Bases when you are finished.
+
+From a terminal in the project folder, `npm.cmd start` launches the same way and `npm.cmd stop` stops a launcher-managed server. No administrator access or permanent execution-policy change is needed. Startup errors appear in a dialog; local process records and diagnostic logs are stored in the ignored `.runtime` folder.
+
+If a server is already running from `npm.cmd run dev`, the launcher opens it but the Stop shortcut leaves that manually started process alone. Close its original terminal once, then use the desktop shortcut for future launches. If another application occupies port 5173, the launcher reports the conflict rather than changing the Spotify callback port. Re-run `npm.cmd run desktop` if you move the project folder. Dependencies and your Spotify configuration must already be set up; launching does not install packages or change credentials.
+
 ## Features
 
 - Startup fetches your account, playlist list, and saved-track metadata automatically. The table starts empty. Selecting a playlist loads its contents; deselecting cancels unfinished loading and reselecting reuses the session cache. Distinct Spotify URIs stay separate; original duplicate occurrences are retained internally.
 - Liked Songs appears in the sidebar like a playlist, including search, folders, membership columns, header sorting, and column reordering. Sidebar selection shows tracks from any selected playlist and adds their membership columns. With none selected, no rows are shown. Removable playlist chips and Clear playlist selection keep this scope visible. Local folders support renaming, ordering, deletion, assignment, and bulk playlist selection.
+- Folder assignments are restored as soon as your Spotify account is identified, even if playlist discovery fails. Folder changes synchronize between tabs, and an older tab's unrelated preference edits preserve newer assignments. Playlists omitted by Spotify remain visible with retry information during a session; saved folder entries without metadata show an unavailable placeholder and a Spotify link until they return.
 - Search title, artist/creator, and album/show. Search and nested All/AND, Any/OR, and None/NOT advanced filters further narrow the selected playlists. Clear advanced filters leaves sidebar selection intact. Sort metadata or playlist membership, resize columns, and hide optional metadata.
 - Search playlist names in the sidebar without changing your current selections or sending API requests. Matching playlists inside collapsed folders are shown during search; folder bulk selection affects matching visible playlists only.
 - Drag playlist-header grips to rearrange membership columns, or focus a grip and use Left/Right arrows. Column order is remembered while playlist selection still starts empty on reload. Click a playlist heading to toggle membership ascending (non-members first) and descending (members first); sorting uses confirmed membership until pending edits are saved.

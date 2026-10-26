@@ -154,6 +154,7 @@ export class Spotify {
   async library(onProgress: (library: Library, status: string) => void): Promise<Library> {
     const account = await this.request<Library['account']>('me');
     const state: Library = { account, playlists: [], saved: [], savedLoaded: false, errors: [] };
+    onProgress(state, 'Loading playlist list');
     state.playlists = (await this.pages<Playlist>('me/playlists?limit=50')).map((p) => ({
       ...p,
       access: 'unloaded',

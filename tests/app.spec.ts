@@ -888,3 +888,147 @@ test('restores a plain embed if controller creation removes the frame then throw
     'https://open.spotify.com/embed/track/b',
   );
 });
+
+async function addFolder(page: Page, name: string) {
+  await page.getByRole('button', { name: 'Create local folder', exact: true }).click();
+  await page.getByRole('textbox', { name: 'New folder name' }).fill(name);
+  await page.getByRole('button', { name: 'Add', exact: true }).click();
+  return (await page
+    .getByLabel('Move My playlist to folder')
+    .locator('option')
+    .filter({ hasText: name })
+    .getAttribute('value'))!;
+}
+
+test('an older tab cannot erase newer folder assignments when saving search', async ({
+  page,
+  context,
+}) => {
+  await mockSpotify(page);
+  await ready(page);
+  const older = await context.newPage();
+  try {
+    await older.addInitScript(() =>
+      window.addEventListener('storage', (event) => event.stopImmediatePropagation()),
+    );
+    await mockSpotify(older);
+    await ready(older);
+    const id = await addFolder(page, 'Keep these');
+    await page.getByLabel('Move My playlist to folder').selectOption(id);
+    await page.getByLabel('Move Playlist 1 to folder').selectOption(id);
+    await older.getByRole('textbox', { name: 'Search library' }).fill('Alpha');
+    await page.reload();
+    await expect(page.getByRole('textbox', { name: 'Rename folder' })).toHaveValue('Keep these');
+    await expect(page.getByLabel('Move My playlist to folder')).toHaveValue(id);
+    await expect(page.getByLabel('Move Playlist 1 to folder')).toHaveValue(id);
+  } finally {
+    await older.close();
+  }
+});
+
+test('folder changes synchronize across tabs without selecting more playlists', async ({
+  page,
+  context,
+}) => {
+  await mockSpotify(page);
+  await ready(page);
+  const other = await context.newPage();
+  try {
+    await mockSpotify(other);
+    await ready(other);
+    const id = await addFolder(page, 'Shared folders');
+    await page.getByLabel('Move My playlist to folder').selectOption(id);
+    await expect(other.getByRole('textbox', { name: 'Rename folder' })).toHaveValue(
+      'Shared folders',
+    );
+    await expect(other.getByLabel('Move My playlist to folder')).toHaveValue(id);
+    await expect(
+      other.getByRole('checkbox', { name: 'My playlist', exact: true }),
+    ).not.toBeChecked();
+    await other.getByRole('textbox', { name: 'Rename folder' }).fill('Updated folder');
+    await expect(page.getByRole('textbox', { name: 'Rename folder' })).toHaveValue(
+      'Updated folder',
+    );
+  } finally {
+    await other.close();
+  }
+});
+
+test('keeps folders on failed discovery and shows missing assignments after reconnect', async ({
+  page,
+}) => {
+  await mockSpotify(page);
+  await ready(page);
+  const id = await addFolder(page, 'Collection');
+  await page.getByLabel('Move My playlist to folder').selectOption(id);
+  await page.getByLabel('Move Playlist 1 to folder').selectOption(id);
+  let fail = true;
+  let omit = false;
+  await page.route('https://api.spotify.com/v1/me/playlists*', (route) => {
+    if (fail)
+      return route.fulfill({
+        status: 503,
+        json: { error: { message: 'Playlist list temporarily unavailable' } },
+      });
+    if (omit)
+      return route.fulfill({
+        json: {
+          items: [
+            {
+              id: 'p',
+              name: 'My playlist',
+              owner: { id: 'me' },
+              snapshot_id: '0',
+              collaborative: false,
+            },
+          ],
+          next: null,
+        },
+      });
+    return route.fallback();
+  });
+  await page.reload();
+  await expect(page.getByRole('textbox', { name: 'Rename folder' })).toHaveValue('Collection');
+  await expect(
+    page.getByRole('link', { name: 'Open unavailable playlist p1 in Spotify' }),
+  ).toBeVisible();
+  await expect(
+    page.getByText('Playlist list temporarily unavailable', { exact: false }).first(),
+  ).toBeVisible();
+  fail = false;
+  omit = true;
+  await expect(page.getByRole('button', { name: 'Refresh', exact: true })).toBeEnabled();
+  await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+  await expect(page.getByLabel('Move My playlist to folder')).toHaveValue(id);
+  await expect(
+    page.getByRole('link', { name: 'Open unavailable playlist p1 in Spotify' }),
+  ).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Disconnect Spotify' })).toBeEnabled();
+  await page.getByRole('button', { name: 'Disconnect Spotify' }).click();
+  omit = false;
+  await ready(page); // The mock restores tokens on navigation, simulating reconnection.
+  await expect(page.getByRole('textbox', { name: 'Rename folder' })).toHaveValue('Collection');
+  await expect(page.getByLabel('Move My playlist to folder')).toHaveValue(id);
+  await expect(page.getByLabel('Move Playlist 1 to folder')).toHaveValue(id);
+});
+
+test('a partial refresh keeps previously listed playlists visible with retry information', async ({
+  page,
+}) => {
+  await mockSpotify(page);
+  await ready(page);
+  const id = await addFolder(page, 'Collection');
+  await page.getByLabel('Move Playlist 1 to folder').selectOption(id);
+  await page.route('https://api.spotify.com/v1/me/playlists*', (route) =>
+    route.fulfill({ json: { items: [], next: null } }),
+  );
+  await page.getByRole('button', { name: 'Refresh', exact: true }).click();
+  await expect(page.getByLabel('Move Playlist 1 to folder')).toHaveValue(id);
+  await expect(
+    page
+      .locator('aside')
+      .getByText('Not returned by Spotify in the latest playlist list.', { exact: false })
+      .first(),
+  ).toBeVisible();
+  await expect(page.getByRole('checkbox', { name: 'My playlist', exact: true })).toBeVisible();
+});

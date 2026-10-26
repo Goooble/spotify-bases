@@ -1,10 +1,12 @@
 # Spotify Bases — Product and Implementation Plan
 
+//TODO: Autoplay dont work
+
 ## 1. Product summary
 
-**Last reviewed:** 2026-10-25, against the current source, configuration, and automated tests.
+**Last reviewed:** 2026-10-26, against the current source, configuration, and automated tests.
 
-**Implementation status:** V1 is implemented as a static React/Vite SPA with Spotify PKCE, automatic saved-track metadata, a Liked Songs sidebar source, on-demand ordinary playlists, full-page virtualized scrolling, nested filters, searchable local folders, draggable and sortable playlist columns, staged batch Save/Discard/Undo, recoverable public playlist creation, and a dynamic Spotify embedded player. Empty public playlist creation is supported. Rate-limit cooldowns persist across reloads. Latest completed validation: 41 unit tests, 20 browser tests, lint, TypeScript checks, and the production build passed. Real-account permissions, live Spotify behavior, and production hosting still require environment-specific verification; see section 11 and README.md.
+**Implementation status:** V1 is implemented as a static React/Vite SPA with Spotify PKCE, automatic saved-track metadata, a Liked Songs sidebar source, on-demand ordinary playlists, full-page virtualized scrolling, nested filters, searchable local folders, draggable and sortable playlist columns, staged batch Save/Discard/Undo, recoverable public playlist creation, and a dynamic Spotify embedded player. Empty public playlist creation is supported. Rate-limit cooldowns persist across reloads. Latest completed validation: 45 unit tests, 24 browser tests, lint, TypeScript checks, and the production build passed. Real-account permissions, live Spotify behavior, and production hosting still require environment-specific verification; see section 11 and README.md.
 
 Build a personal web app for managing Spotify playlists and exploring music already present in the user's Spotify library. The core interface is a Bases-inspired table: one row per distinct Spotify item, with track metadata and optional playlist-membership columns. The user narrows the library with search, filters, and sorts, then adds tracks to a new public playlist or edits an existing editable playlist directly from the table.
 
@@ -77,6 +79,7 @@ Playlist selection always starts empty; legacy stored selections are ignored. Ad
 - Let the user create, rename, reorder, and delete local folders; folder deletion must not delete or unfollow Spotify playlists.
 - Let the user assign a playlist to a local folder and move playlists between folders.
 - Selecting one or more playlists displays their membership columns and the deduplicated union of their tracks. Folder bulk selection applies the same behavior. Removable playlist chips and a Clear playlist selection action expose the active scope.
+- Restore account-scoped folders immediately after account identification, before playlist discovery completes. Disable folder edits until account preferences are available. Failed discovery preserves existing navigation; partial discovery retains previously listed sources with retry information. Keep stored folder IDs when Spotify omits metadata and show unavailable placeholders after reload/reconnection rather than silently hiding those entries.
 - Include individual selection, folder bulk selection, removable selected-source chips, and Clear playlist selection. Clearing selection removes all rows and membership columns, while retaining loaded data in the session cache.
 - Search playlist names locally in the sidebar without changing existing selections or making API calls. Show matching children of collapsed folders during search; folder bulk selection applies only to visible matches.
 - Disabled/inaccessible playlists remain visible and explain the limitation on hover or selection.
@@ -202,7 +205,9 @@ Obsidian Bases references:
 - `LibraryTable.tsx` and `Sidebar.tsx`: window virtualization, sticky/pinned columns, drag/keyboard ordering, header sorting, local playlist search, and folders.
 - `rateLimit.ts` and `useRateLimit.ts`: persisted cooldown gate and diagnostic countdown.
 - `App.tsx`: workspace composition, preview, settings, source selection, save/discard controls, and draft protection.
+- `preferences.ts`: merge explicit changes against the latest account-scoped saved preferences, including folder membership deltas, to keep an older tab from overwriting newer assignments. Storage events synchronize folder changes without restoring another tab's source selection.
 - `SpotifyEmbed.tsx`: immediately visible track/episode iframe, optional click-to-play controller, API cache across hot reloads, initialization timeout, and plain-embed recovery.
+- Windows launcher scripts: install Start/Stop desktop shortcuts, launch a hidden local Vite process, wait for readiness before opening the default browser, reuse an existing app server, and stop only the process recorded and verified for this project. Runtime state and logs live in ignored `.runtime`; `npm start`, `npm run stop`, and `npm run desktop` expose the workflow.
 
 ## 7. Implementation phases
 
@@ -312,11 +317,13 @@ Phases 0–5 and the local implementation in Phase 6 are complete. The lists bel
 
 ## 11. Validation and remaining release checks
 
-Latest completed automated validation: **41 unit tests and 20 browser tests passed**, together with `npm run lint`, `npm run typecheck`, and `npm run build`. Unit coverage includes normalization, nested filters, token lifecycle, pagination/cancellation, cooldown persistence, batched save recovery, Liked Songs writes, and Undo. Browser coverage includes empty initial selection with automatic saved metadata, source selection, sidebar search/folders, drag and keyboard column ordering, resizing, header sorting, draft protection, empty creation and creation recovery, dynamic track/episode embeds with click playback, delayed readiness, stalled initialization, script failure and controller-creation fallback, Liked Songs permissions, and a 20,000-row/20-column scrolling fixture.
+Latest completed automated validation: **45 unit tests and 24 browser tests passed**, together with `npm run lint`, `npm run typecheck`, and `npm run build`. Unit coverage includes normalization, nested filters, token lifecycle, pagination/cancellation, cooldown persistence, batched save recovery, Liked Songs writes, and Undo. Browser coverage includes empty initial selection with automatic saved metadata, source selection, sidebar search/folders, drag and keyboard column ordering, resizing, header sorting, draft protection, empty creation and creation recovery, dynamic track/episode embeds with click playback, delayed readiness, stalled initialization, script failure and controller-creation fallback, folder persistence across failed/partial discovery and reconnection, synchronization and stale-tab writes, Liked Songs permissions, and a 20,000-row/20-column scrolling fixture.
 
 GitHub Actions runs lint, typecheck, unit tests, the production build, and Chromium browser tests on pushes and pull requests. Browser tests use mocked Spotify responses and an isolated local server on port 5174; they do not modify a real Spotify account.
 
 Live embed smoke check: the repaired React player loaded Spotify's real iframe API and a public track in an isolated Chromium browser, rendered one 152px-high iframe without page errors, and removed it on close. The user also confirmed embedded playback worked before the autoplay change. The isolated check verifies loading and cleanup, not signed-in playback availability or autoplay permission.
+
+Windows launcher checks: parsed both scripts with Windows PowerShell, verified a hidden start/reuse/stop/already-stopped cycle on isolated port 5176, and verified that a manually started app on port 5173 is reused but not stopped. A stale process record was ignored and an occupied test port was rejected without stopping its owner. The installer created and updated test shortcuts successfully, and installed the two real desktop shortcuts with hidden PowerShell launch arguments. Everyday launches retain port 5173 and the existing Spotify callback; the optional port parameter is for isolated diagnostics. No administrator access or permanent execution-policy change is required for normal use.
 
 Before a production release, verify the configured Spotify app's real authorization grants, readable/editable sources, save/Undo behavior on disposable content, live embedded playback availability, and the host's HTTPS/callback rewrite. Review refresh timestamp wording: the current stored timestamp records playlist discovery completion rather than completion of every selected source load. Spotify's actual quota reset schedule cannot be verified by mocked tests or inferred from the app's fallback pause.
 

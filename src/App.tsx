@@ -44,6 +44,7 @@ import { continueCreation, type Creation } from './operations';
 import LibraryTable from './LibraryTable';
 import FilterEditor from './FilterEditor';
 import Sidebar from './Sidebar';
+import { mergePreferences } from './preferences';
 import SpotifyEmbed from './SpotifyEmbed';
 function Modal({
   open,
@@ -120,14 +121,32 @@ export default function App() {
     window.addEventListener('beforeunload', warn);
     return () => window.removeEventListener('beforeunload', warn);
   }, [pendingCount]);
-  const updatePrefs = useCallback((next: Preferences) => {
-    setPrefs(next);
-    if (prefKey.current)
-      try {
-        localStorage.setItem(prefKey.current, JSON.stringify({ ...next, columns: [] }));
-      } catch {
-        setError('Browser storage is full or unavailable. Preferences could not be saved.');
-      }
+  const updatePrefs = useCallback(
+    (next: Preferences) => {
+      let merged = next;
+      if (prefKey.current)
+        try {
+          const saved =
+            localStorage.getItem(prefKey.current) === null
+              ? prefs
+              : loadPreferences(prefKey.current);
+          merged = mergePreferences(prefs, next, saved);
+          localStorage.setItem(prefKey.current, JSON.stringify({ ...merged, columns: [] }));
+        } catch {
+          setError('Browser storage is full or unavailable. Preferences could not be saved.');
+        }
+      setPrefs(merged);
+    },
+    [prefs],
+  );
+  useEffect(() => {
+    const sync = (event: StorageEvent) => {
+      if (!prefKey.current || event.key !== prefKey.current || event.storageArea !== localStorage)
+        return;
+      setPrefs((current) => ({ ...loadPreferences(prefKey.current), columns: current.columns }));
+    };
+    window.addEventListener('storage', sync);
+    return () => window.removeEventListener('storage', sync);
   }, []);
   async function refresh() {
     if (savingRef.current || workspace.metadataLoading) return;
@@ -410,7 +429,7 @@ export default function App() {
           playlists={library?.playlists ?? []}
           prefs={prefs}
           onChange={updatePrefs}
-          disabled={saving || creating || refreshing}
+          disabled={!library || saving || creating || refreshing}
           onRetry={(id) => void workspace.load(id)}
         />
         <main>

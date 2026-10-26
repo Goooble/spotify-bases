@@ -6,3 +6,4 @@ dist/
 *.tsbuildinfo
 playwright-report/
 test-results/
+.runtime/
